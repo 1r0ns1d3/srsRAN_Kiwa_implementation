@@ -33,30 +33,12 @@ Build Preparation
 
 You can install the build tools and mandatory requirements for some example distributions with the commands below:
 
-<details open>
-<summary><strong>Ubuntu 22.04</strong></summary>
+<summary><strong>Ubuntu 22.04 (Kali as is on test-laptops)</strong></summary>
 
 ```bash
 sudo apt-get install cmake make gcc g++ pkg-config libfftw3-dev libmbedtls-dev libsctp-dev libyaml-cpp-dev libgtest-dev soapysdr-tools python3-soapysdr python3-numpy bladerf soapysdr-module-bladerf uhd-host uhd-soapysdr soapysdr-module-uhd
 ```
 
-</details>
-<details>
-<summary><strong>Fedora</strong></summary>
-
-```bash
-sudo yum install cmake make gcc gcc-c++ fftw-devel lksctp-tools-devel yaml-cpp-devel mbedtls-devel gtest-devel
-```
-
-</details>
-<details>
-<summary><strong>Arch Linux</strong></summary>
-
-```bash
-sudo pacman -S cmake make base-devel fftw mbedtls yaml-cpp lksctp-tools gtest
-```
-
-</details>
 
 #### Split-8
 
