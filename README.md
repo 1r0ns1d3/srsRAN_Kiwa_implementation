@@ -37,7 +37,7 @@ You can install the build tools and mandatory requirements for some example dist
 <summary><strong>Ubuntu 22.04</strong></summary>
 
 ```bash
-sudo apt-get install cmake make gcc g++ pkg-config libfftw3-dev libmbedtls-dev libsctp-dev libyaml-cpp-dev libgtest-dev
+sudo apt-get install cmake make gcc g++ pkg-config libfftw3-dev libmbedtls-dev libsctp-dev libyaml-cpp-dev libgtest-dev soapysdr-tools python3-soapysdr python3-numpy bladerf soapysdr-module-bladerf uhd-host uhd-soapysdr soapysdr-module-uhd
 ```
 
 </details>
