@@ -286,7 +286,6 @@ public:
         return;
       }
 
-      usrp->set_time_source(sync_src);
       usrp->set_clock_source(clock_src);
     });
 #else
