@@ -40,7 +40,7 @@ class radio_uhd_tx_stream : public baseband_gateway_transmitter, public uhd_exce
 {
 private:
   /// Receive asynchronous message timeout in seconds.
-  static constexpr double RECV_ASYNC_MSG_TIMEOUT_S = 0.001;
+  static constexpr double RECV_ASYNC_MSG_TIMEOUT_S = 0;
   /// Transmit timeout in seconds.
   static constexpr double TRANSMIT_TIMEOUT_S = 0;
 
