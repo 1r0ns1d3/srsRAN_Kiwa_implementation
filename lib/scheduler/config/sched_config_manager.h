@@ -24,7 +24,6 @@
 
 #include "du_cell_group_config_pool.h"
 #include "ue_configuration.h"
-#include "srsran/adt/concurrent_queue.h"
 #include "srsran/adt/mpmc_queue.h"
 #include "srsran/adt/noop_functor.h"
 #include "srsran/scheduler/config/scheduler_config.h"
@@ -119,6 +118,8 @@ public:
 
   const cell_configuration* add_cell(const sched_cell_configuration_request_message& msg);
 
+  void rem_cell(du_cell_index_t cell_index);
+
   ue_config_update_event add_ue(const sched_ue_creation_request_message& cfg_req);
 
   ue_config_update_event update_ue(const sched_ue_reconfiguration_message& cfg_req);
@@ -141,6 +142,7 @@ public:
   const cell_common_configuration_list& common_cell_list() const { return added_cells; }
 
 private:
+  friend class cell_removal_event;
   friend class ue_config_update_event;
   friend class ue_config_delete_event;
 

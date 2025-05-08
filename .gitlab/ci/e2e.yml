@@ -8,7 +8,7 @@
 
 include:
   - project: softwareradiosystems/ci/tools
-    ref: "20"
+    ref: "21"
     file: .gitlab/ci-shared/setup/all.yml
   - local: .gitlab/ci-shared/e2e.yml
 
@@ -97,7 +97,7 @@ smoke zmq:
   variables:
     TESTBED: "" # Check before_script
     MARKERS: smoke
-    PYTEST_ARGS: -x ${EXTRA_SMOKE_ZMQ}
+    RETINA_LAUNCHER_ARGS: -x ${EXTRA_SMOKE_ZMQ}
     RETINA_PARAM_ARGS: gnb.all.pcap=True gnb.all.mac_enable=True gnb.all.rlc_enable=True gnb.all.enable_integrity_protection=True
     E2E_LOG_LEVEL: info
   before_script:
@@ -173,6 +173,7 @@ amari 1UE rtsan:
       artifacts: true
     - *txrx-lib
     - *retina-needs
+  when: manual
   allow_failure: true
 
 amari 4UE deb:
@@ -233,22 +234,20 @@ amari 8UE:
   timeout: 4h
   parallel:
     matrix:
-      - KEYWORDS:
-          [
-            "reestablishment and sequentially",
-            "handover and sequentially",
-            "attach_detach",
-          ]
+      - E2E_FILE_OR_DIR: tests/reestablishment.py
+        KEYWORDS: "sequentially"
+      - E2E_FILE_OR_DIR: tests/handover.py
+        KEYWORDS: "sequentially"
+      - E2E_FILE_OR_DIR: tests/attach_detach.py
 
 amari 8UE beta:
   extends: amari 8UE
   parallel:
     matrix:
-      - KEYWORDS:
-          [
-            "reestablishment and not sequentially",
-            "handover and not sequentially",
-          ]
+      - E2E_FILE_OR_DIR: tests/reestablishment.py
+        KEYWORDS: "not sequentially"
+      - E2E_FILE_OR_DIR: tests/handover.py
+        KEYWORDS: "not sequentially"
   when: manual
   allow_failure: true
 
@@ -259,21 +258,24 @@ amari 32UE:
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
   parallel:
     matrix:
-      - KEYWORDS:
+      - E2E_FILE_OR_DIR: tests/iperf.py
+        KEYWORDS:
           [
-            "iperf and udp and band:3",
-            "iperf and udp and not band:3",
-            "iperf and tcp and band:3",
-            "iperf and tcp and not band:3",
-            "pucch",
+            "udp and band:3",
+            "udp and not band:3",
+            "tcp and band:3",
+            "tcp and not band:3 and not precoding",
+            "tcp and not band:3 and precoding",
           ]
+      - E2E_FILE_OR_DIR: tests/pucch.py
 
 amari 32UE [ping]:
   extends: .zmq-uesim
   variables:
+    E2E_FILE_OR_DIR: tests/ping.py
     MARKERS: "zmq and not smoke"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
-    KEYWORDS: "ping and 32"
+    KEYWORDS: "32"
 
 amari 32UE 2x2 mimo:
   extends: .zmq-uesim
@@ -281,36 +283,44 @@ amari 32UE 2x2 mimo:
     MARKERS: "zmq_2x2_mimo"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
 
+amari 64UE 2x2 mimo:
+  extends: .zmq
+  when: manual
+  allow_failure: true
+  variables:
+    E2E_FILE_OR_DIR: tests/iperf.py
+    MARKERS: "64"
+    RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
+
 cudu amari 8UE:
   extends: .zmq
   timeout: 2h
   variables:
     TESTBED: zmq_cudu
+    E2E_FILE_OR_DIR: tests/reestablishment.py
+    KEYWORDS: "sequentially"
     MARKERS: "zmq and not smoke"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
-  parallel:
-    matrix:
-      - KEYWORDS: ["reestablishment and sequentially"]
 
 cudu amari 32UE:
   extends: .zmq
   timeout: 2h
   variables:
     TESTBED: zmq_cudu
+    E2E_FILE_OR_DIR: tests/iperf.py
+    KEYWORDS: "tcp and not band:3 and bandwidth:50 and not precoding"
     MARKERS: "zmq and not smoke"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
-  parallel:
-    matrix:
-      - KEYWORDS: ["iperf and tcp and not band:3 and bandwidth:50"]
 
 cudu amari 64UE:
   extends: .zmq
   timeout: 3h
   variables:
     TESTBED: zmq_cudu
+    E2E_FILE_OR_DIR: tests/ping.py
+    KEYWORDS: "64"
     MARKERS: "zmq and not smoke"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
-    KEYWORDS: "ping and 64"
 
 ric:
   extends: .zmq
@@ -335,7 +345,7 @@ ntn:
 ################################################################################
 
 test mode ue:
-  stage: zmq
+  stage: test mode
   extends: .e2e-run
   variables:
     TESTBED: "test_mode"
@@ -362,7 +372,7 @@ test mode ue memcheck:
     - *retina-needs
 
 test mode ru:
-  stage: zmq
+  stage: test mode
   extends: .e2e-run
   variables:
     GROUP: "viavi"
@@ -381,6 +391,7 @@ test mode ru tsan:
   extends: test mode ru
   variables:
     MARKERS: "test_mode_not_crash"
+    KEYWORDS: "test_ru and not 16cell"
   needs:
     - job: "basic tsan"
       artifacts: true
@@ -391,6 +402,7 @@ test mode ru asan:
   extends: test mode ru
   variables:
     MARKERS: "test_mode_not_crash"
+    KEYWORDS: "test_ru and not 16cell"
   needs:
     - job: "basic asan"
       artifacts: true
@@ -401,6 +413,7 @@ test mode ru memcheck:
   extends: test mode ru
   variables:
     MARKERS: "test_mode_not_crash"
+    KEYWORDS: "test_ru and not 16cell"
   needs:
     - job: "basic memcheck"
       artifacts: true
@@ -415,6 +428,16 @@ test mode ru acc100:
     TESTBED: "test_mode_acc100"
     MARKERS: "test_mode_acc100"
     KEYWORDS: ""
+
+test mode ue many ues:
+  extends: test mode ru
+  variables:
+    GROUP: "viavi"
+    TESTBED: "viavi"
+    MARKERS: "test_mode_many_ues"
+    KEYWORDS: "test_mode_many_ues"
+    E2E_LOG_LEVEL: "warning"
+    RETINA_LAUNCHER_ARGS: "--retina-pod-timeout 900"
 
 ################################################################################
 # RF
@@ -531,87 +554,146 @@ android drx:
     KUBECONFIG_VAR_NAME_EXTRA: "RETINA_NAMESPACE_KUBECONFIG_EXTRA"
     RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=True gnb.all.rlc_rb_type=srb"
     RETINA_LAUNCHER_ARGS: "--retina-pod-timeout 900"
-
-viavi:
-  extends: .viavi
-  needs:
-    - job: "basic avx512 dpdk"
-      artifacts: true
-    - *retina-needs
   rules:
     - if: $CI_DESCRIPTION =~ /Nightly E2E Tests Plugin/
-  parallel:
-    matrix:
-      - KEYWORDS:
-          [
-            "ideal and 1UE and not MIMO",
-            "ideal and 1UE and MIMO",
-            "ideal and 32UE and not experimental and not tdd and not extended and not UM",
-            "tdd",
-            "fading and 1UE and not MIMO",
-            "fading and 1UE and MIMO",
-            "fading and 32UE",
-            "birth-death and 1UE",
-            "32UE and experimental and not extended",
-          ]
-
-viavi-um:
-  extends: .viavi
-  rules:
-    - if: $CI_DESCRIPTION =~ /Weekly/
-  variables:
-    KEYWORDS: "ideal and UM"
   needs:
     - job: "basic avx512 dpdk"
       artifacts: true
     - *retina-needs
 
-viavi-extended:
+viavi 1UE:
   extends: .viavi
-  rules:
-    - if: $CI_DESCRIPTION =~ /Weekly/
   variables:
-    KEYWORDS: "extended and not 24h"
-  timeout: 28 hours
+    KEYWORDS: "1UE and ideal and not MIMO"
+
+viavi 1UE MIMO:
+  extends: .viavi
+  variables:
+    KEYWORDS: "1UE and ideal and MIMO"
+
+viavi 1UE birth-death:
+  extends: .viavi
+  variables:
+    KEYWORDS: "1UE and birth-death"
+
+viavi 1UE fading:
+  extends: .viavi
+  variables:
+    KEYWORDS: "1UE and fading and not MIMO"
+
+viavi 1UE fading MIMO:
+  extends: .viavi
+  variables:
+    KEYWORDS: "1UE and fading and MIMO"
+
+viavi 32UE ping:
+  extends: .viavi
+  variables:
+    KEYWORDS: "32UE and ping"
+
+viavi 32UE UDP:
+  extends: .viavi
+  variables:
+    KEYWORDS: "32UE and ideal and not long and not tdd and not UM and udp"
+
+viavi 32UE TCP:
+  extends: .viavi
+  variables:
+    KEYWORDS: "32UE and ideal and not long and not tdd and not UM and tcp"
+
+viavi 32UE fading:
+  extends: .viavi
+  variables:
+    KEYWORDS: "32UE and fading"
+
+viavi 32UE tdd:
+  extends: .viavi
+  variables:
+    KEYWORDS: "32UE and tdd"
+
+viavi 1h:
+  extends: .viavi
+  variables:
+    KEYWORDS: "1h"
   needs:
     - job: "basic avx512 dpdk"
       artifacts: true
+    - job: "viavi 32UE UDP"
+      artifacts: false
     - *retina-needs
 
-viavi-extended-24h:
-  extends: .viavi
-  timeout: 28 hours
-  rules:
-    - if: $CI_DESCRIPTION =~ /Weekly/
-  variables:
-    KEYWORDS: "extended and 24h"
-  needs:
-    - job: "basic avx512 dpdk"
-      artifacts: true
-    - *retina-needs
-
-viavi-debug:
+viavi debug:
   extends: .viavi
   variables:
     MARKERS: "viavi_debug"
   when: manual
+  allow_failure: true
   needs:
     - job: "basic avx512 dpdk withassert"
       artifacts: true
     - *retina-needs
 
-viavi-rtsan:
+viavi rtsan:
   extends: .viavi
+  variables:
+    KEYWORDS: "rtsan"
+  when: manual
+  allow_failure: true
   needs:
     - job: "basic avx512 dpdk rtsan"
       artifacts: true
     - *retina-needs
+
+viavi um:
+  extends: .viavi
   rules:
-    - if: $CI_DESCRIPTION =~ /Nightly E2E Tests Plugin/
-  parallel:
-    matrix:
-      - KEYWORDS: ["tdd and 6u3d"]
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 1 hour
+  variables:
+    KEYWORDS: "ideal and UM"
+
+viavi 3h:
+  extends: .viavi
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 1 hour
+  variables:
+    KEYWORDS: "3h"
+
+viavi 24h:
+  extends: .viavi
+  timeout: 26 hours
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+  variables:
+    KEYWORDS: "24h"
+
+################################################################################
+# Amari S72
+################################################################################
+
+.s72:
+  stage: rf
+  extends: .e2e-run
+  variables:
+    GROUP: uesim
+    TESTBED: "s72_uesim"
+    E2E_LOG_LEVEL: "info"
+    RETINA_LAUNCHER_ARGS: "--retina-pod-timeout 900"
   allow_failure: true
+  needs:
+    - job: "basic avx2 dpdk"
+      artifacts: true
+    - *retina-needs
+
+amari 2UE s72x:
+  extends: .s72
+  variables:
+    MARKERS: "s72"
+    RETINA_PARAM_ARGS: "gnb.all.pcap=True gnb.all.rlc_enable=False gnb.all.enable_integrity_protection=True"
+  timeout: 4h
 
 ################################################################################
 # Garbage collector
@@ -622,9 +704,7 @@ retina setup:
     - .prepare_test
   retry: 2
   rules:
-    - if: $CI_DESCRIPTION =~ /Nightly E2E Tests/
-      when: always
-    - if: $CI_DESCRIPTION =~ /Weekly/
+    - if: $CI_DESCRIPTION =~ /Nightly E2E Tests Plugin/
       when: always
   interruptible: false
   image:
@@ -661,4 +741,5 @@ retina runners:
     branch: main
   needs:
     - job: "retina setup"
+      optional: true
       artifacts: false

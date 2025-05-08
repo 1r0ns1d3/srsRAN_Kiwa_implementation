@@ -26,15 +26,13 @@
 #include "srsran/phy/lower/lower_phy_error_notifier.h"
 #include "srsran/phy/support/resource_grid_context.h"
 #include "srsran/ru/ru_error_notifier.h"
-#include "srsran/srslog/srslog.h"
+#include "srsran/srslog/logger.h"
 
 namespace srsran {
 
-/// Implements a lower physical layer error adapter to an RU error adapter.
 class ru_generic_error_adapter : public lower_phy_error_notifier
 {
 public:
-  /// Creates an adapter with a given logger.
   ru_generic_error_adapter(srslog::basic_logger& logger_, ru_error_notifier& notifier_) :
     logger(logger_), notifier(notifier_)
   {
@@ -49,7 +47,7 @@ public:
                    "Real-time failure in low-phy: Downlink data late for sector {} and slot {}.",
                    context.sector,
                    context.slot);
-    l1_tracer << instant_trace_event{"on_late_resource_grid", instant_trace_event::cpu_scope::global};
+    l1_dl_tracer << instant_trace_event{"on_late_resource_grid", instant_trace_event::cpu_scope::global};
   }
 
   // See interface for documentation.
@@ -61,7 +59,7 @@ public:
                    context.sector,
                    context.slot,
                    context.start_symbol);
-    l1_tracer << instant_trace_event{"on_prach_request_late", instant_trace_event::cpu_scope::global};
+    l1_ul_tracer << instant_trace_event{"on_prach_request_late", instant_trace_event::cpu_scope::global};
   }
 
   // See interface for documentation.
@@ -73,7 +71,7 @@ public:
                    context.sector,
                    context.slot,
                    context.start_symbol);
-    l1_tracer << instant_trace_event{"on_prach_request_overflow", instant_trace_event::cpu_scope::global};
+    l1_ul_tracer << instant_trace_event{"on_prach_request_overflow", instant_trace_event::cpu_scope::global};
   }
 
   // See interface for documentation.
@@ -85,7 +83,7 @@ public:
                    "Real-time failure in low-phy: PUxCH request late for sector {}, slot {}.",
                    context.sector,
                    context.slot);
-    l1_tracer << instant_trace_event{"on_puxch_request_late", instant_trace_event::cpu_scope::global};
+    l1_ul_tracer << instant_trace_event{"on_puxch_request_late", instant_trace_event::cpu_scope::global};
   }
 
 private:

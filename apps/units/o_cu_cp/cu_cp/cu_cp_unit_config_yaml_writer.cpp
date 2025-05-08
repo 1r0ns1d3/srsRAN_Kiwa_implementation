@@ -73,11 +73,13 @@ static YAML::Node build_cu_cp_extra_amfs_item_section(const cu_cp_unit_amf_confi
   node["port"]                   = config.port;
   node["bind_addr"]              = config.bind_addr;
   node["bind_interface"]         = config.bind_interface;
-  node["sctp_rto_initial"]       = config.sctp_rto_initial;
-  node["sctp_rto_min"]           = config.sctp_rto_min;
-  node["sctp_rto_max"]           = config.sctp_rto_max;
+  node["sctp_rto_initial"]       = config.sctp_rto_initial_ms;
+  node["sctp_rto_min"]           = config.sctp_rto_min_ms;
+  node["sctp_rto_max"]           = config.sctp_rto_max_ms;
   node["sctp_init_max_attempts"] = config.sctp_init_max_attempts;
-  node["sctp_max_init_timeo"]    = config.sctp_max_init_timeo;
+  node["sctp_max_init_timeo"]    = config.sctp_max_init_timeo_ms;
+  node["sctp_hb_interval"]       = config.sctp_hb_interval_s;
+  node["sctp_assoc_max_retx"]    = config.sctp_assoc_max_retx;
   node["sctp_nodelay"]           = config.sctp_nodelay;
 
   auto sta_node = node["supported_tracking_areas"];
@@ -299,10 +301,17 @@ static void fill_cu_cp_pcap_section(YAML::Node node, const cu_cp_unit_pcap_confi
   node["e1ap_enable"]   = config.e1ap.enabled;
 }
 
+static void fill_cu_cp_metrics_layers_section(YAML::Node node, const cu_cp_unit_metrics_layer_config& config)
+{
+  node["enable_pdcp"] = config.enable_pdcp;
+}
+
 static void fill_cu_cp_metrics_section(YAML::Node node, const cu_cp_unit_metrics_config& config)
 {
-  node["cu_cp_statistics_report_period"] = config.cu_cp_statistics_report_period;
-  node["pdcp_report_period"]             = config.pdcp.report_period;
+  auto perdiodicity_node                   = node["periodicity"];
+  perdiodicity_node["cu_cp_report_period"] = config.cu_cp_report_period;
+
+  fill_cu_cp_metrics_layers_section(node["layers"], config.layers_cfg);
 }
 
 static void fill_cu_cp_am_section(YAML::Node node, const cu_cp_unit_rlc_am_config& config)

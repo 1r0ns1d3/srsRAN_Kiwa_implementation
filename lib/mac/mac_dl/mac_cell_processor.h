@@ -24,6 +24,8 @@
 
 #include "cell_dl_harq_buffer_pool.h"
 #include "dl_sch_pdu_assembler.h"
+#include "mac_cell_time_mapper_impl.h"
+#include "mac_dl_metric_handler.h"
 #include "mac_dl_ue_repository.h"
 #include "mac_scheduler_cell_info_handler.h"
 #include "paging_pdu_assembler.h"
@@ -31,27 +33,25 @@
 #include "sib_pdu_assembler.h"
 #include "ssb_assembler.h"
 #include "srsran/mac/mac.h"
-#include "srsran/scheduler/mac_scheduler.h"
 #include "srsran/support/memory_pool/ring_buffer_pool.h"
 
 namespace srsran {
 
 class timer_manager;
-class mac_dl_cell_metric_handler;
 
 class mac_cell_processor final : public mac_cell_slot_handler, public mac_cell_controller
 {
 public:
-  mac_cell_processor(const mac_cell_creation_request& cell_cfg_req,
-                     mac_scheduler_cell_info_handler& sched,
-                     du_rnti_table&                   rnti_table,
-                     mac_cell_result_notifier&        phy_notifier,
-                     task_executor&                   cell_exec,
-                     task_executor&                   slot_exec,
-                     task_executor&                   ctrl_exec,
-                     mac_pcap&                        pcap,
-                     timer_manager&                   timers,
-                     mac_dl_cell_metric_handler&      cell_metrics);
+  mac_cell_processor(const mac_cell_creation_request&     cell_cfg_req,
+                     mac_scheduler_cell_info_handler&     sched,
+                     du_rnti_table&                       rnti_table,
+                     mac_cell_result_notifier&            phy_notifier,
+                     task_executor&                       cell_exec,
+                     task_executor&                       slot_exec,
+                     task_executor&                       ctrl_exec,
+                     mac_pcap&                            pcap,
+                     timer_manager&                       timers,
+                     const mac_cell_metric_report_config& metrics_cfg);
 
   /// Starts configured cell.
   async_task<void> start() override;
@@ -61,7 +61,9 @@ public:
 
   async_task<mac_cell_reconfig_response> reconfigure(const mac_cell_reconfig_request& request) override;
 
-  void handle_slot_indication(slot_point sl_tx) override;
+  mac_cell_time_mapper_impl& get_time_mapper() { return slot_time_mapper; }
+
+  void handle_slot_indication(const mac_cell_timing_context& context) override;
   void handle_error_indication(slot_point sl_tx, error_event event) override;
 
   /// Creates new UE DL context, updates logical channel MUX, adds UE in scheduler.
@@ -116,7 +118,7 @@ private:
   ticking_ring_buffer_pool pdu_pool;
 
   /// ssb_helper: contains the SSB-specific parameters that are derived from those passed by the DU interface. These
-  /// parameters are passed to the scheduler and also also to the PHY to generate the SSB PDU and PBCH payload.
+  /// parameters are passed to the scheduler and also to the PHY to generate the SSB PDU and PBCH payload.
   ssb_assembler ssb_helper;
 
   sib_pdu_assembler    sib_assembler;
@@ -127,13 +129,14 @@ private:
   mac_scheduler_cell_info_handler& sched;
 
   // Handler of cell metrics
-  mac_dl_cell_metric_handler& metrics;
+  mac_dl_cell_metric_handler metrics;
 
-  /// Represents activation cell state.
-  // Note: For now, cells start active.
-  enum class cell_state { inactive, active } state = cell_state::inactive;
+  // Represents cell activation state.
+  enum class cell_state { inactive, activating, active } state = cell_state::inactive;
 
   mac_pcap& pcap;
+
+  mac_cell_time_mapper_impl slot_time_mapper;
 
   bool sib1_pcap_dumped = false;
 };

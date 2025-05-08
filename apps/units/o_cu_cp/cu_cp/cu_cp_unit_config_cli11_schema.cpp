@@ -132,20 +132,27 @@ static void configure_cli11_amf_item_args(CLI::App& app, cu_cp_unit_amf_config_i
   add_option(app, "--bind_addr", config.bind_addr, "Local IP address to bind for N2 interface")->check(CLI::ValidIPV4);
   add_option(app, "--bind_interface", config.bind_interface, "Network device to bind for N2 interface")
       ->capture_default_str();
-  add_option(app, "--sctp_rto_initial", config.sctp_rto_initial, "SCTP initial RTO value");
-  add_option(app, "--sctp_rto_min", config.sctp_rto_min, "SCTP RTO min");
-  add_option(app, "--sctp_rto_max", config.sctp_rto_max, "SCTP RTO max");
+  add_option(app, "--sctp_rto_initial", config.sctp_rto_initial_ms, "SCTP initial RTO value in milliseconds");
+  add_option(app, "--sctp_rto_min", config.sctp_rto_min_ms, "SCTP RTO min in milliseconds");
+  add_option(app, "--sctp_rto_max", config.sctp_rto_max_ms, "SCTP RTO max in milliseconds");
   add_option(app, "--sctp_init_max_attempts", config.sctp_init_max_attempts, "SCTP init max attempts");
-  add_option(app, "--sctp_max_init_timeo", config.sctp_max_init_timeo, "SCTP max init timeout ");
+  add_option(app, "--sctp_max_init_timeo", config.sctp_max_init_timeo_ms, "SCTP max init timeout in milliseconds");
+  add_option(app, "--sctp_hb_interval", config.sctp_hb_interval_s, "SCTP heartbeat interval in seconds")
+      ->capture_default_str();
+  add_option(app, "--sctp_assoc_max_retx", config.sctp_assoc_max_retx, "SCTP assocination max retransmissions")
+      ->capture_default_str();
   add_option(app,
              "--sctp_nodelay",
              config.sctp_nodelay,
              "Send SCTP messages as soon as possible without any Nagle-like algorithm");
 
-  // supported tracking areas configuration parameters.
+  // Supported tracking areas configuration parameters.
   app.add_option_function<std::vector<std::string>>(
       "--supported_tracking_areas",
       [&config](const std::vector<std::string>& values) {
+        // If supported tracking areas are configured clear default values.
+        config.supported_tas.clear();
+        config.is_default_supported_tas = false;
         config.supported_tas.resize(values.size());
 
         for (unsigned i = 0, e = values.size(); i != e; ++i) {
@@ -544,16 +551,22 @@ static void configure_cli11_qos_args(CLI::App& app, cu_cp_unit_qos_config& qos_p
   app.needs(pdcp_subcmd);
 }
 
+static void configure_cli11_metrics_layers_args(CLI::App& app, cu_cp_unit_metrics_layer_config& metrics_params)
+{
+  add_option(app, "--enable_pdcp", metrics_params.enable_pdcp, "Enable PDCP metrics")->capture_default_str();
+}
+
 static void configure_cli11_metrics_args(CLI::App& app, cu_cp_unit_metrics_config& metrics_params)
 {
-  add_option(app,
-             "--cu_cp_statistics_report_period",
-             metrics_params.cu_cp_statistics_report_period,
-             "CU-CP statistics report period in seconds. Set this value to 0 to disable this feature")
+  auto* periodicity_subcmd = add_subcommand(app, "periodicity", "Metrics periodicity configuration")->configurable();
+  add_option(*periodicity_subcmd,
+             "--cu_cp_report_period",
+             metrics_params.cu_cp_report_period,
+             "CU-CP metrics report period in milliseconds")
       ->capture_default_str();
-  add_option(
-      app, "--pdcp_report_period", metrics_params.pdcp.report_period, "PDCP metrics report period (in milliseconds)")
-      ->capture_default_str();
+
+  auto* layers_subcmd = add_subcommand(app, "layers", "Layer basis metrics configuration")->configurable();
+  configure_cli11_metrics_layers_args(*layers_subcmd, metrics_params.layers_cfg);
 }
 
 void srsran::configure_cli11_with_cu_cp_unit_config_schema(CLI::App& app, cu_cp_unit_config& unit_cfg)

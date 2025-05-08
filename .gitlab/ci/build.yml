@@ -8,20 +8,11 @@
 
 include:
   - project: softwareradiosystems/ci/srsran_project_packaging
-    ref: "7"
+    ref: "8"
     file: .gitlab/ci-shared/package.yml
   - local: .gitlab/ci-shared/build.yml
 
 variables:
-  TEST_MODE:
-    description: What tests to run. None won't run any test at all.
-    options:
-      - "default"
-      - "coverage"
-      - "tsan"
-      - "valgrind"
-      - "none"
-    value: "default"
   SRSRANDIR: ${CI_PROJECT_DIR}
 
 ################
@@ -54,23 +45,13 @@ variables:
     - job: trigger builder
       optional: true
       artifacts: false
+    - job: get plugin commit
+      optional: true
+      artifacts: true
+  variables:
+    PLUGIN_INDEX_ARRAY: "0" # Space separated list of indexes of plugins to build. f.e. "0 1 2"
   script:
     - &srs_functions |
-      CMAKE_FLAGS_CMD=""
-      if [[ $TEST_MODE = "none" ]]; then
-        CMAKE_FLAGS_CMD="${CMAKE_FLAGS_CMD} -DBUILD_TESTS=False"
-      fi
-
-      echo "INFRASTRUCTURE_TAG=${INFRASTRUCTURE_TAG}"
-      echo "OS=${OS}"
-      echo "COMPILER=${COMPILER}"
-      echo "TEST_MODE=${TEST_MODE}"
-      echo "BUILD_ARGS=${CMAKE_FLAGS_CMD} ${BUILD_ARGS}"
-      echo "UHD_VERSION=${UHD_VERSION}"
-      echo "DPDK_VERSION=${DPDK_VERSION}"
-      echo "SRS_TARGET=${SRS_TARGET}"
-      echo "PLUGIN_BRANCH=${PLUGIN_BRANCH}"
-
       build_srsgnb() {
         target="$1"
 
@@ -80,7 +61,7 @@ variables:
           ram_reporter_pid=$!
         fi
 
-        build_srsran "${target}" ${CMAKE_FLAGS_CMD}
+        build_srsran
         if [[ -n "$OUTPUT_FINGERPRINT" ]]; then
           echo "Storing fingerprints of all executables to $OUTPUT_FINGERPRINT"
           cd build
@@ -106,22 +87,6 @@ variables:
 
       launch_tests() {
         cd ${CI_PROJECT_DIR}/build
-        case $TEST_MODE in
-          none)
-            echo "Tests skipped"
-            exit 0
-            ;;
-          tsan)
-            ctest_extra="-L tsan"
-            ;;
-          valgrind)
-            G_DEBUG=gc-friendly G_SLICE=always-malloc
-            # Default timeout per test is 1500 (25 min)
-            export CTEST_TIMEOUT=3600
-            export CTEST_TEST_TIMEOUT=${CTEST_TIMEOUT}
-            ctest_extra="-T memcheck -LE NO_MEMCHECK --timeout ${CTEST_TIMEOUT}"
-            ;;
-        esac
         if [ -n "${FINGERPRINT}" ]; then
           echo "Searching for changed tests"
           CTEST_SUBSET=$(/usr/local/builder_tools/bin/python /usr/local/bin/changed_tests.py -b . -i "../${FINGERPRINT}" -d md5)
@@ -135,7 +100,7 @@ variables:
           fi
         fi
         echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-        CTEST_CMD="ctest -j${KUBERNETES_CPU_REQUEST} ${CTEST_SUBSET_CMD} $ctest_extra --schedule-random --output-on-failure --output-junit xunit.xml"
+        CTEST_CMD="ctest -j${KUBERNETES_CPU_REQUEST} ${CTEST_SUBSET_CMD} $CTEST_ARGS --schedule-random --output-on-failure --output-junit xunit.xml"
         echo "+ ${CTEST_CMD}"
 
         status_file=$(mktemp)
@@ -190,11 +155,37 @@ variables:
 
         exit $ret
       }
-      if [[ $CI_MERGE_REQUEST_LABELS != *"ci-no-plugin"* && -n $PLUGIN_BRANCH ]]; then
-        git submodule add https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_SHELL_SSH_HOST}/${PLUGIN_REPO}.git ${PLUGIN_PATH}
-        git submodule set-branch --branch ${PLUGIN_BRANCH} ${PLUGIN_PATH}
+
+      if [[ $CI_DISABLE_PLUGINS != "True" ]]; then
+        PLUGIN_PATH_ARRAY=()
+        PLUGIN_REPO_ARRAY=()
+        PLUGIN_REF_ARRAY=()
+        while IFS='|' read -r path repo ref; do
+            PLUGIN_PATH_ARRAY+=("$path")
+            PLUGIN_REPO_ARRAY+=("$repo")
+            PLUGIN_REF_ARRAY+=("$ref")
+        done < <(grep -v '^#' "$PLUGINS_DATA_FILE")
+
+        for index in $PLUGIN_INDEX_ARRAY; do
+            PLUGIN_PATH="${PLUGIN_PATH_ARRAY[$index]}"
+            PLUGIN_REPO="${PLUGIN_REPO_ARRAY[$index]}"
+            PLUGIN_REF="${PLUGIN_REF_ARRAY[$index]}"
+            PLUGIN_REF=$(eval echo $PLUGIN_REF)
+            
+            if [[ ! -f "$PLUGIN_PATH" ]]; then
+              echo "#############################"
+              echo "#### $PLUGIN_PATH checkout ####"
+              echo "#############################"
+              git submodule add https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_SHELL_SSH_HOST}/${PLUGIN_REPO}.git plugins/${PLUGIN_PATH}
+              cd plugins/${PLUGIN_PATH}
+              git fetch --depth=1 origin ${PLUGIN_REF} > /dev/null
+              git config advice.detachedHead false
+              git checkout ${PLUGIN_REF}
+              cd ${CI_PROJECT_DIR}
+            fi
+        done
       fi
-    - build_srsgnb "${SRS_TARGET}"
+    - build_srsgnb
     - launch_tests
   timeout: 6h
 
@@ -231,6 +222,7 @@ variables:
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Release
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: coverage
     ENABLE_GCOV: "True"
     MARCH: x86-64-v3
@@ -247,11 +239,11 @@ variables:
       rm ${CI_PROJECT_DIR}/build/apps/gnb_split_6/gnb
     - launch_tests
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.04
     COMPILER: clang
     CMAKE_BUILD_TYPE: RelWithDebInfo
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: default
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
@@ -259,11 +251,11 @@ variables:
 .smoke tsan:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.10
     COMPILER: clang
     CMAKE_BUILD_TYPE: Debug
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     ENABLE_TSAN: "True"
     TEST_MODE: tsan
     MARCH: x86-64-v3
@@ -272,12 +264,12 @@ variables:
 .smoke archlinux:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: archlinux-latest
     ENABLE_WERROR: "False"
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Debug
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: default
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
@@ -285,7 +277,6 @@ variables:
 .smoke dpdk:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-22.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Release
@@ -293,6 +284,7 @@ variables:
     ENABLE_ZEROMQ: "False"
     ENABLE_DPDK: "True"
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     DPDK_VERSION: "23.11.1_avx2"
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
@@ -300,11 +292,11 @@ variables:
 .smoke valgrind:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Debug
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: valgrind
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
@@ -312,11 +304,11 @@ variables:
 .smoke avx512:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Release
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: default
     MARCH: x86-64-v4
     INFRASTRUCTURE_TAG: amd64-avx2-avx512
@@ -324,11 +316,11 @@ variables:
 .smoke arm:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Release
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: default
     MARCH: armv8-a
     INFRASTRUCTURE_TAG: arm64
@@ -336,11 +328,11 @@ variables:
 .smoke arm neon:
   extends: .build_and_unit
   variables:
-    PLUGIN_BRANCH: $MR_PLUGIN_REF
     OS: ubuntu-24.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Release
     ASSERT_LEVEL: PARANOID
+    ENABLE_FFTW: "True"
     TEST_MODE: default
     MARCH: armv8.2-a+crypto+fp16+dotprod
     INFRASTRUCTURE_TAG: arm64
@@ -528,7 +520,9 @@ intermediate commits cached:
     - if: $CI_MERGE_REQUEST_LABELS =~ /ci-no-cache/
       when: never
     - if: $ON_MR
-  timeout: 2 hour
+  timeout: 2 hours
+  variables:
+    CI_DISABLE_PLUGINS: "True"
   script:
     - *srs_functions
     - git config advice.detachedHead false
@@ -568,28 +562,40 @@ valgrind changed tests:
     TEST_EXECUTION_TIMEOUT: 20m
   script:
     - *srs_functions
+    - |
+      PLUGIN_PATH="${PLUGIN_PATH_ARRAY[0]}"
+      PLUGIN_REF="${PLUGIN_REF_ARRAY[0]}"
+      PLUGIN_REF=$(eval echo $PLUGIN_REF)
+      REPO_PLUGIN_COMMIT_SHA=$(cat .gitlab/ci/plugin_version.txt)
     - git config advice.detachedHead false
     - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME --depth 40
     - |
       FORK_POINT=$(git merge-base origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
-      echo "##################################################"
-      echo "#### $FORK_POINT ####"
-      echo "##################################################"
+      echo "#############################################################################################"
+      echo "#### $FORK_POINT | $REPO_PLUGIN_COMMIT_SHA ####"
+      echo "#############################################################################################"
       git checkout $FORK_POINT
+      cd plugins/${PLUGIN_PATH}
+      git fetch origin ${REPO_PLUGIN_COMMIT_SHA} > /dev/null
+      git checkout ${REPO_PLUGIN_COMMIT_SHA}
+      cd ${CI_PROJECT_DIR}
       OUTPUT_FINGERPRINT="${FINGERPRINT}"
       build_srsgnb
       OUTPUT_FINGERPRINT=""
     - |
-      echo "##################################################"
-      echo "#### origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME ####"
-      echo "##################################################"
+      echo "#############################################################################################"
+      echo "#### $CI_COMMIT_SHA | $PLUGIN_REF ####"
+      echo "#############################################################################################"
       git checkout origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
+      cd plugins/${PLUGIN_PATH}
+      git checkout ${PLUGIN_REF}
+      cd ${CI_PROJECT_DIR}      
       build_srsgnb
     - echo "This test execution has a timeout of ${TEST_EXECUTION_TIMEOUT}. If the execution excess that timer, the job will be marked as allowed_to_fail. This will avoid the job to have a huge duration in a MR pipeline."
     - launch_tests
   cache:
     - *cache_build_get
-  artifacts:
+  artifacts: &valgrind_artifacts
     when: on_failure
     paths:
       - build/Testing/Temporary
@@ -734,15 +740,29 @@ smoke asan:
     - if: $CI_DESCRIPTION =~ /Nightly Build Unit Tests/
       when: delayed
       start_in: 45 minutes
-  retry: 2
-  interruptible: false
   variables:
     OS: ubuntu-24.04
     COMPILER: clang
     CMAKE_BUILD_TYPE: Debug
     ASSERT_LEVEL: PARANOID
     ENABLE_ASAN: "True"
-    TEST_MODE: asan
+    MARCH: x86-64-v3
+    INFRASTRUCTURE_TAG: amd64-avx2
+
+smoke rtsan:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Nightly Build Unit Tests/
+      when: delayed
+      start_in: 45 minutes
+  variables:
+    OS: ubuntu-24.04-rtsan
+    COMPILER: clang
+    CMAKE_BUILD_TYPE: Debug
+    ASSERT_LEVEL: PARANOID
+    ENABLE_RTSAN: "True"
+    ENABLE_WERROR: "False"
+    TEST_MODE: rtsan
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
 
@@ -771,6 +791,7 @@ package:
       - OS_VERSION: "22.04"
       - OS_VERSION: "24.04"
       - OS_VERSION: "24.10"
+      - OS_VERSION: "25.04"
   needs: []
 
 install-package:
@@ -789,6 +810,7 @@ install-package:
       - OS_VERSION: "22.04"
       - OS_VERSION: "24.04"
       - OS_VERSION: "24.10"
+      - OS_VERSION: "25.04"
   needs:
     - package
 
@@ -816,8 +838,8 @@ export on amd64:
     INFRASTRUCTURE_TAG: amd64-avx2
   parallel:
     matrix:
-      - OS: [ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
-      - OS: [ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
         MARCH: x86-64-v3
 
 export on amd64 avx512:
@@ -826,10 +848,25 @@ export on amd64 avx512:
     INFRASTRUCTURE_TAG: amd64-avx2-avx512
   parallel:
     matrix:
-      - OS: [ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04, ubuntu-22.04]
         MARCH: x86-64-v4
 
 # Build + unit tests combinations
+
+ubuntu-25.04 amd64 avx2:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Nightly Build Unit Tests/
+      when: delayed
+      start_in: 300 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    MARCH: x86-64-v3
+    INFRASTRUCTURE_TAG: amd64-avx2
+  parallel:
+    matrix:
+      - <<: *basic_combinations
 
 ubuntu-24.10 amd64 avx2:
   extends: .build_and_unit
@@ -950,15 +987,18 @@ ubuntu dpdk:
     INFRASTRUCTURE_TAG: amd64-avx2
   parallel:
     matrix:
+      - OS: ubuntu-25.04
+        COMPILER: [gcc, clang]
+        DPDK_VERSION: ["24.11.1_avx2"]
       - OS: ubuntu-24.10
         COMPILER: [gcc, clang]
-        DPDK_VERSION: ["23.11.1_avx2"]
+        DPDK_VERSION: ["23.11.1_avx2", "24.11.1_avx2"]
       - OS: ubuntu-24.04
         COMPILER: [gcc, clang]
-        DPDK_VERSION: ["23.11.1_avx2"]
+        DPDK_VERSION: ["23.11.1_avx2", "24.11.1_avx2"]
       - OS: ubuntu-22.04
         COMPILER: [gcc, clang]
-        DPDK_VERSION: ["22.11.6_avx2", "23.11.1_avx2"]
+        DPDK_VERSION: ["22.11.6_avx2", "23.11.1_avx2", "24.11.1_avx2"]
 
 # Nightly Sanitizers
 
@@ -969,7 +1009,7 @@ ubsan avx2:
       when: delayed
       start_in: 45 minutes
   variables:
-    OS: ubuntu-24.10
+    OS: ubuntu-25.04
     COMPILER: gcc
     CMAKE_BUILD_TYPE: Debug
     ASSERT_LEVEL: PARANOID
@@ -977,8 +1017,8 @@ ubsan avx2:
     TEST_MODE: default
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2-docker
-    KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "50G"
-    KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "50G"
+    KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "60G"
+    KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "60G"
   timeout: 2 hours
 
 ###################
@@ -1088,6 +1128,8 @@ debian 12 amd64 avx512:
   variables:
     ASSERT_LEVEL: PARANOID
     CMAKE_BUILD_TYPE: Debug
+  artifacts:
+    <<: *valgrind_artifacts
 
 sanitizers amd64 native:
   extends: .weekly sanitizers
@@ -1096,7 +1138,7 @@ sanitizers amd64 native:
   parallel:
     matrix:
       # ubuntu-22.04 disabled due to https://github.com/google/sanitizers/issues/1259#issuecomment-642312392
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: tsan
         COMPILER: [gcc, clang]
         ENABLE_TSAN: "True"
@@ -1106,20 +1148,20 @@ sanitizers amd64 native:
         COMPILER: [gcc, clang]
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: asan
         COMPILER: clang
         ENABLE_ASAN: "True"
         TEST_MODE: default
       # Valgrind doesn't support AVX512 instruction set
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: ubsan
         COMPILER: [gcc, clang]
         ENABLE_UBSAN: "True"
         TEST_MODE: default
         INFRASTRUCTURE_TAG: amd64-docker
-        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "50G"
-        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "50G"
+        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "60G"
+        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "60G"
 
 sanitizers amd64 avx2:
   extends: .weekly sanitizers
@@ -1129,7 +1171,7 @@ sanitizers amd64 avx2:
   parallel:
     matrix:
       # ubuntu-22.04 disabled due to https://github.com/google/sanitizers/issues/1259#issuecomment-642312392
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: tsan
         COMPILER: [gcc, clang]
         ENABLE_TSAN: "True"
@@ -1139,23 +1181,23 @@ sanitizers amd64 avx2:
         COMPILER: [gcc, clang]
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: asan
         COMPILER: clang
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: valgrind
         COMPILER: gcc
         TEST_MODE: valgrind
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: ubsan
         COMPILER: [gcc, clang]
         ENABLE_UBSAN: "True"
         TEST_MODE: default
         INFRASTRUCTURE_TAG: amd64-avx2-docker
-        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "50G"
-        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "50G"
+        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "60G"
+        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "60G"
 
 sanitizers amd64 avx512:
   extends: .weekly sanitizers
@@ -1165,7 +1207,7 @@ sanitizers amd64 avx512:
   parallel:
     matrix:
       # ubuntu-22.04 disabled due to https://github.com/google/sanitizers/issues/1259#issuecomment-642312392
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: tsan
         COMPILER: [gcc, clang]
         ENABLE_TSAN: "True"
@@ -1175,20 +1217,20 @@ sanitizers amd64 avx512:
         COMPILER: [gcc, clang]
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: asan
         COMPILER: clang
         ENABLE_ASAN: "True"
         TEST_MODE: default
       # Valgrind doesn't support AVX512 instruction set
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: ubsan
         COMPILER: [gcc, clang]
         ENABLE_UBSAN: "True"
         TEST_MODE: default
         INFRASTRUCTURE_TAG: amd64-avx2-avx512-docker
-        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "50G"
-        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "50G"
+        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "60G"
+        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "60G"
 
 sanitizers arm native:
   extends: .weekly sanitizers
@@ -1197,7 +1239,7 @@ sanitizers arm native:
   parallel:
     matrix:
       # ubuntu-22.04 disabled due to https://github.com/google/sanitizers/issues/1259#issuecomment-642312392
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: tsan
         COMPILER: [gcc, clang]
         ENABLE_TSAN: "True"
@@ -1207,23 +1249,23 @@ sanitizers arm native:
         COMPILER: [gcc, clang]
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: asan
         COMPILER: clang
         ENABLE_ASAN: "True"
         TEST_MODE: default
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: valgrind
         COMPILER: gcc
         TEST_MODE: valgrind
-      - OS: [ubuntu-24.10, ubuntu-24.04]
+      - OS: [ubuntu-25.04, ubuntu-24.10, ubuntu-24.04]
         SANITIZER: ubsan
         COMPILER: [gcc, clang]
         ENABLE_UBSAN: "True"
         TEST_MODE: default
         INFRASTRUCTURE_TAG: arm64-docker
-        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "50G"
-        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "50G"
+        KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "60G"
+        KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "60G"
 
 sanitizers arm neon:
   extends: sanitizers arm native
@@ -1244,17 +1286,76 @@ build uhd alt:
     INFRASTRUCTURE_TAG: amd64-avx2
   parallel:
     matrix:
-      - OS: ubuntu-24.10
+      - OS: [ubuntu-25.04, ubuntu-24.10]
         COMPILER: [gcc, clang]
-        UHD_VERSION: ["4.7.0.0"]
+        UHD_VERSION: ["4.8.0.0", "4.7.0.0"]
       - OS: ubuntu-24.04
         COMPILER: [gcc, clang]
-        UHD_VERSION: ["4.7.0.0", "4.6.0.0"]
+        UHD_VERSION: ["4.8.0.0", "4.7.0.0", "4.6.0.0"]
       - OS: ubuntu-22.04
         COMPILER: [gcc, clang]
-        UHD_VERSION: ["4.7.0.0", "4.6.0.0", "4.4.0.0", "4.3.0.0", "4.1.0.5"]
+        UHD_VERSION:
+          ["4.8.0.0", "4.7.0.0", "4.6.0.0", "4.4.0.0", "4.3.0.0", "4.1.0.5"]
 
 # Build + unit tests combinations
+
+ubuntu-25.04 amd64 native:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 430 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    INFRASTRUCTURE_TAG: amd64
+  parallel:
+    matrix:
+      - <<: *basic_combinations
+
+ubuntu-25.04 amd64 avx512:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 430 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    MARCH: x86-64-v4
+    INFRASTRUCTURE_TAG: amd64-avx2-avx512
+  parallel:
+    matrix:
+      - <<: *basic_combinations
+
+ubuntu-25.04 arm native:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 430 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    INFRASTRUCTURE_TAG: arm64
+  parallel:
+    matrix:
+      - <<: *basic_combinations
+
+ubuntu-25.04 arm neon:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 430 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    MARCH: armv8.2-a+crypto+fp16+dotprod
+    INFRASTRUCTURE_TAG: arm64
+  parallel:
+    matrix:
+      - <<: *basic_combinations
 
 ubuntu-24.10 amd64 native:
   extends: .build_and_unit
@@ -1524,7 +1625,7 @@ ubuntu-22.04 amd64 avx2 dpdk:
   parallel:
     matrix:
       - <<: *basic_combinations_dpdk
-        DPDK_VERSION: ["22.11.6_avx2", "23.11.1_avx2"]
+        DPDK_VERSION: ["22.11.6_avx2", "23.11.1_avx2", "24.11.1_avx2"]
 
 ubuntu-22.04 amd64 avx512 dpdk:
   extends: .build_and_unit
@@ -1540,7 +1641,7 @@ ubuntu-22.04 amd64 avx512 dpdk:
   parallel:
     matrix:
       - <<: *basic_combinations_dpdk
-        DPDK_VERSION: ["22.11.6_avx512", "23.11.1_avx512"]
+        DPDK_VERSION: ["22.11.6_avx512", "23.11.1_avx512", "24.11.1_avx512"]
 
 ubuntu-24.04 amd64 avx2 dpdk:
   extends: .build_and_unit
@@ -1559,6 +1660,12 @@ ubuntu-24.04 amd64 avx2 dpdk:
         DPDK_VERSION: "23.11.1_avx2"
       - <<: *basic_combinations
         DPDK_VERSION: "23.11.1_avx2"
+        ENABLE_FFTW: "False"
+        ENABLE_MKL: "True"
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx2"
+      - <<: *basic_combinations
+        DPDK_VERSION: "24.11.1_avx2"
         ENABLE_FFTW: "False"
         ENABLE_MKL: "True"
 
@@ -1581,6 +1688,12 @@ ubuntu-24.04 amd64 avx512 dpdk:
         DPDK_VERSION: "23.11.1_avx512"
         ENABLE_FFTW: "False"
         ENABLE_MKL: "True"
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx512"
+      - <<: *basic_combinations
+        DPDK_VERSION: "24.11.1_avx512"
+        ENABLE_FFTW: "False"
+        ENABLE_MKL: "True"
 
 ubuntu-24.10 amd64 avx2 dpdk:
   extends: .build_and_unit
@@ -1597,6 +1710,8 @@ ubuntu-24.10 amd64 avx2 dpdk:
     matrix:
       - <<: *basic_combinations_dpdk
         DPDK_VERSION: "23.11.1_avx2"
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx2"
 
 ubuntu-24.10 amd64 avx512 dpdk:
   extends: .build_and_unit
@@ -1613,6 +1728,40 @@ ubuntu-24.10 amd64 avx512 dpdk:
     matrix:
       - <<: *basic_combinations_dpdk
         DPDK_VERSION: "23.11.1_avx512"
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx512"
+
+ubuntu-25.04 amd64 avx2 dpdk:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 460 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    MARCH: x86-64-v3
+    INFRASTRUCTURE_TAG: amd64-avx2
+  parallel:
+    matrix:
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx2"
+
+ubuntu-25.04 amd64 avx512 dpdk:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Weekly/
+      when: delayed
+      start_in: 460 minutes
+  interruptible: false
+  variables:
+    OS: ubuntu-25.04
+    MARCH: x86-64-v4
+    INFRASTRUCTURE_TAG: amd64-avx2-avx512
+  parallel:
+    matrix:
+      - <<: *basic_combinations_dpdk
+        DPDK_VERSION: "24.11.1_avx512"
 
 ###############
 # E2E Nightly #
@@ -1669,7 +1818,7 @@ basic tsan:
     TEST_MODE: none
     MARCH: x86-64-v3
     INFRASTRUCTURE_TAG: amd64-avx2
-    BUILD_ARGS: -DEXIT_TIMEOUT=15
+    BUILD_ARGS: -DEXIT_TIMEOUT=60
   after_script:
     - *build_after_script
   artifacts:
@@ -1763,6 +1912,33 @@ basic ru dummy:
     FORCE_DEBUG_INFO: "True"
     ASSERT_LEVEL: AUTO
     INFRASTRUCTURE_TAG: amd64-avx2-avx512
+  after_script:
+    - *build_after_script
+  artifacts:
+    <<: *build_artifacts
+    expire_in: 3 days
+
+basic avx2 dpdk:
+  extends: .build_and_unit
+  rules:
+    - if: $CI_DESCRIPTION =~ /Nightly E2E Tests/
+  retry: 2
+  interruptible: false
+  variables:
+    SRS_TARGET: gnb_split_7_2
+    OS: ubuntu-24.04
+    COMPILER: gcc
+    CMAKE_BUILD_TYPE: Release
+    TEST_MODE: none
+    ENABLE_UHD: "False"
+    ENABLE_ZEROMQ: "False"
+    ENABLE_DPDK: "True"
+    DPDK_VERSION: "23.11.1_avx2"
+    MARCH: x86-64-v3
+    FORCE_DEBUG_INFO: "True"
+    ASSERT_LEVEL: AUTO
+    INFRASTRUCTURE_TAG: amd64-avx2
+    BUILD_ARGS: -DEXIT_TIMEOUT=30
   after_script:
     - *build_after_script
   artifacts:

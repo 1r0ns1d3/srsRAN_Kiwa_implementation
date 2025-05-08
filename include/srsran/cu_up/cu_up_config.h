@@ -49,17 +49,23 @@ struct network_interface_config {
 };
 
 struct n3_interface_config {
-  int                       upf_port = GTPU_PORT;  // TS 29.281 Sec. 4.4.2.3 Encapsulated T-PDUs
-  std::chrono::milliseconds gtpu_reordering_timer; // N3 reordering timer
+  int                       upf_port = GTPU_PORT;      // TS 29.281 Sec. 4.4.2.3 Encapsulated T-PDUs
+  std::chrono::milliseconds gtpu_reordering_timer;     // N3 reordering timer
+  std::chrono::milliseconds gtpu_rate_limiting_period; // N3 token bucket rate limiting period.
+  bool                      gtpu_ignore_ue_ambr;       // Ignore DL UE-AMBR.
+  uint32_t                  gtpu_queue_size;           // GTP-U queue size in PDUs.
+  uint32_t                  gtpu_batch_size;           // Maximum number of GTP-U PDUs processed in a batch.
   bool                      warn_on_drop;
 };
 
 struct cu_up_test_mode_config {
-  bool     enabled           = false;
-  bool     integrity_enabled = true;
-  bool     ciphering_enabled = true;
-  uint16_t nea_algo          = 2;
-  uint16_t nia_algo          = 2;
+  bool                      enabled           = false;
+  bool                      integrity_enabled = true;
+  bool                      ciphering_enabled = true;
+  uint16_t                  nea_algo          = 2;
+  uint16_t                  nia_algo          = 2;
+  uint64_t                  ue_ambr           = 40000000000;
+  std::chrono::milliseconds attach_detach_period{0};
 };
 
 /// CU-UP configuration.

@@ -35,6 +35,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/modules")
 include(version) # sets version information
 
@@ -185,6 +186,12 @@ ADD_CXX_COMPILER_FLAG_IF_AVAILABLE(-Wsuggest-override HAVE_SUGGEST_OVERRIDE)
 # Avoid shadow variables which can be caused due to C code ported into C++
 ADD_CXX_COMPILER_FLAG_IF_AVAILABLE(-Wshadow HAVE_SHADOW)
 
+# Avoid extra (stray) semicolons
+ADD_CXX_COMPILER_FLAG_IF_AVAILABLE(-Wextra-semi HAVE_EXTRA_SEMI)
+
+# Disable RTTI
+ADD_CXX_COMPILER_FLAG_IF_AVAILABLE(-fno-rtti HAVE_NO_RTTI)
+
 # Set compiler flags for different build types.
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ggdb -O0 -DDEBUG_MODE -DBUILD_TYPE_DEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ggdb -DBUILD_TYPE_RELWITHDEBINFO")
@@ -193,12 +200,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fno-trapping-math -fno-
 if(ENABLE_GPROF)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 endif(ENABLE_GPROF)
-
-if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-  if (HAVE_SSE)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Ofast -funroll-loops")
-  endif (HAVE_SSE)
-endif (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 
 if (ENABLE_ASAN)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
@@ -215,7 +216,7 @@ if (ENABLE_TSAN)
 endif (ENABLE_TSAN)
 
 if (ENABLE_UBSAN)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fno-sanitize=vptr")
     add_definitions(-DENABLE_UBSAN)
 endif ()
 
@@ -374,6 +375,9 @@ if (ENABLE_DPDK)
     find_package(DPDK ${DPDK_MIN_VERSION})
     if (DPDK_FOUND)
         include_directories(SYSTEM ${DPDK_INCLUDE_DIRS})
+    else ()
+        unset(DPDK_FOUND CACHE)
+        message(WARNING "Building without DPDK support as DPDK dependencies could not be resolved")
     endif (DPDK_FOUND)
 else (ENABLE_DPDK)
     unset(DPDK_FOUND CACHE)
@@ -477,7 +481,7 @@ endif (BUILD_TESTS)
 if (ENABLE_PLUGINS)
    # Discover all subdirectories in the plugin directory (but not recursively)
    file(GLOB SUBDIRS RELATIVE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/plugins/*)
-   
+
    # Loop through each plugin subdirectory
    foreach(subdir ${SUBDIRS})
        # Check if it's a directory and contains a CMakeLists.txt file

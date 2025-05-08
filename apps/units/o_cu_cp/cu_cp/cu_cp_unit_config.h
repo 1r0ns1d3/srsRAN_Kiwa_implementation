@@ -51,25 +51,23 @@ struct cu_cp_unit_supported_ta_item {
   std::vector<cu_cp_unit_plmn_item> plmn_list;
 };
 
-/// All tracking area related configuration parameters.
-struct cu_cp_unit_ta_config {
-  /// List of all tracking areas supported by the CU-CP.
-  std::vector<cu_cp_unit_supported_ta_item> supported_tas;
-};
-
 struct cu_cp_unit_amf_config_item {
   std::string ip_addr                = "127.0.0.1";
   uint16_t    port                   = 38412;
   std::string bind_addr              = "127.0.0.1";
   std::string bind_interface         = "auto";
-  int         sctp_rto_initial       = 120;
-  int         sctp_rto_min           = 120;
-  int         sctp_rto_max           = 500;
+  int         sctp_rto_initial_ms    = 120;
+  int         sctp_rto_min_ms        = 120;
+  int         sctp_rto_max_ms        = 500;
   int         sctp_init_max_attempts = 3;
-  int         sctp_max_init_timeo    = 500;
+  int         sctp_max_init_timeo_ms = 500;
+  int         sctp_hb_interval_s     = 30;
+  int         sctp_assoc_max_retx    = 10;
   bool        sctp_nodelay           = false;
+
   /// List of all tracking areas supported by the AMF.
-  std::vector<cu_cp_unit_supported_ta_item> supported_tas;
+  std::vector<cu_cp_unit_supported_ta_item> supported_tas = {{7, {{"00101", {cu_cp_unit_plmn_item::tai_slice_t{1}}}}}};
+  bool                                      is_default_supported_tas = true;
 };
 
 struct cu_cp_unit_amf_config {
@@ -267,14 +265,20 @@ struct cu_cp_unit_qos_config {
   cu_cp_unit_pdcp_config pdcp;
 };
 
+/// Configuration to enable/disable metrics per layer.
+struct cu_cp_unit_metrics_layer_config {
+  bool enable_pdcp = false;
+
+  /// Returns true if one or more layers are enabled, false otherwise.
+  bool are_metrics_enabled() const { return enable_pdcp; }
+};
+
 /// Metrics configuration.
 struct cu_cp_unit_metrics_config {
-  /// Statistics report period in seconds
-  unsigned cu_cp_statistics_report_period = 1;
-  struct pdcp_metrics {
-    unsigned report_period = 1000; // PDCP report period in ms
-  } pdcp;
-  app_helpers::metrics_config common_metrics_cfg;
+  /// CU-CP statistics report period in milliseconds.
+  unsigned                        cu_cp_report_period = 1000;
+  app_helpers::metrics_config     common_metrics_cfg;
+  cu_cp_unit_metrics_layer_config layers_cfg;
 };
 
 /// CU-CP application unit configuration.

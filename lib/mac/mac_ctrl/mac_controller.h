@@ -24,6 +24,7 @@
 
 #include "../mac_config_interfaces.h"
 #include "mac_config.h"
+#include "mac_metrics_aggregator.h"
 #include "mac_scheduler_configurator.h"
 #include "srsran/mac/mac_config.h"
 #include "srsran/ran/du_types.h"
@@ -49,12 +50,17 @@ public:
                  mac_scheduler_configurator& sched_cfg_);
 
   /// Adds new cell configuration to MAC. The configuration is forwarded to the scheduler.
-  void add_cell(const mac_cell_creation_request& cell_cfg) override;
+  mac_cell_controller& add_cell(const mac_cell_creation_request& cell_cfg) override;
 
   /// Removes cell configuration from MAC. The cell is also removed from the scheduler.
   void remove_cell(du_cell_index_t cell_index) override;
 
-  mac_cell_controller& get_cell_controller(du_cell_index_t cell_index) override;
+  mac_cell_controller& get_cell_controller(du_cell_index_t cell_index) override
+  {
+    return dl_unit.get_cell_controller(cell_index);
+  }
+
+  mac_cell_time_mapper& get_time_mapper(du_cell_index_t cell_index) override;
 
   /// Creates UE in MAC and scheduler.
   async_task<mac_ue_create_response> handle_ue_create_request(const mac_ue_create_request& msg) override;
@@ -91,6 +97,9 @@ private:
   mac_dl_configurator&        dl_unit;
   rnti_manager&               rnti_table;
   mac_scheduler_configurator& sched_cfg;
+
+  // Metrics aggregator.
+  mac_metrics_aggregator metrics;
 
   // UE database
   du_ue_list<mac_ue_context> ue_db;

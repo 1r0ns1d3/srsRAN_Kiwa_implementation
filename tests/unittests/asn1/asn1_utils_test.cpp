@@ -463,7 +463,7 @@ TEST(asn1_seq_of_test, pack_unpack_and_operators)
   b2 = {buffer};
   unpack_dyn_seq_of(bseq2, b2, 0, 33, integer_packer<uint32_t>(lb, ub, false));
   TESTASSERT(bseq2 == bseq);
-  TESTASSERT(std::equal(&bseq2[0], &bseq2[fixed_list_size], &fixed_list[0]));
+  TESTASSERT(std::equal(bseq2.begin(), bseq2.end(), &fixed_list[0]));
 
   {
     bounded_array<uint32_t, 33> bseq3;
@@ -561,7 +561,7 @@ public:
     value = v;
     return *this;
   }
-              operator uint8_t() { return (uint8_t)value; }
+  operator uint8_t() { return (uint8_t)value; }
   std::string to_string() const
   {
     switch (value) {
@@ -646,7 +646,7 @@ public:
     value = v;
     return *this;
   }
-              operator uint8_t() { return (uint8_t)value; }
+  operator uint8_t() { return (uint8_t)value; }
   std::string to_string() const
   {
     switch (value) {
@@ -669,7 +669,7 @@ TEST(asn1_enumerated, bool_to_enum_test)
   TESTASSERT(enum_to_bool(e2));
   e2 = EnumBoolTest::options::nulltype;
   TESTASSERT(!enum_to_bool(e2));
-};
+}
 
 void test_json_writer()
 {

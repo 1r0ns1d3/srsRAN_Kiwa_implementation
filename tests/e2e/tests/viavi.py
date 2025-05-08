@@ -496,7 +496,7 @@ def check_metrics_criteria(
         _create_viavi_result(
             "UL bitrate", kpis.ul_brate_aggregate, operator.gt, test_configuration.expected_ul_bitrate
         ),
-        _create_viavi_result("DL KOs (gnb)", kpis.nof_ko_dl, operator.lt, test_configuration.expected_nof_kos + 100),
+        _create_viavi_result("DL KOs (gnb)", kpis.nof_ko_dl, operator.lt, test_configuration.expected_nof_kos),
         _create_viavi_result(
             "DL KOs (viavi)",
             viavi_kpis.dl_data.num_tbs_errors if viavi_kpis.dl_data.num_tbs_errors is not None else 0,
@@ -511,6 +511,7 @@ def check_metrics_criteria(
             test_configuration.expected_nof_kos,
         ),
         _create_viavi_result("Errors" + (" & warnings" if warning_as_errors else ""), gnb_error_count, operator.eq, 0),
+        _create_viavi_result("Viavi Warnings", len(viavi_kpis.warning_array), operator.lt, float("inf")),
         _create_viavi_result(
             "Procedure table", viavi_kpis.get_number_of_procedure_failures(_OMIT_VIAVI_FAILURE_LIST), operator.eq, 0
         ),

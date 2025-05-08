@@ -48,7 +48,7 @@ void re_pattern::get_inclusion_mask(bounded_bitset<MAX_RB * NRE>& mask, unsigned
   }
 
   // Generate a RE mask for the entire bandwidth.
-  bounded_bitset<MAX_RB* NRE> pattern_re_mask = prb_mask.kronecker_product<NRE>(re_mask);
+  bounded_bitset<MAX_RB * NRE> pattern_re_mask = prb_mask.kronecker_product<NRE>(re_mask);
 
   // Append zeros or discard bits to match the input mask size.
   pattern_re_mask.resize(mask.size());
@@ -83,7 +83,7 @@ void re_pattern::get_exclusion_mask(bounded_bitset<MAX_RB * NRE>& mask, unsigned
   }
 
   // Generate a RE mask for the entire bandwidth.
-  bounded_bitset<MAX_RB* NRE> pattern_re_mask = prb_mask.kronecker_product<NRE>(re_mask);
+  bounded_bitset<MAX_RB * NRE> pattern_re_mask = prb_mask.kronecker_product<NRE>(re_mask);
 
   // Append zeros or discard bits to match the input mask size.
   pattern_re_mask.resize(mask.size());
@@ -115,7 +115,7 @@ void re_pattern_list::merge(const re_pattern& pattern)
 
     // OFDM symbols and subcarriers mask match, combine PRB.
     if (lmatch && kmatch) {
-      bounded_bitset<MAX_RB> temp_prb_mask = pattern.prb_mask;
+      prb_bitmap temp_prb_mask = pattern.prb_mask;
       if (p.prb_mask.size() < temp_prb_mask.size()) {
         p.prb_mask.resize(temp_prb_mask.size());
       } else if (p.prb_mask.size() > temp_prb_mask.size()) {
@@ -173,9 +173,8 @@ void re_pattern_list::get_inclusion_mask(bounded_bitset<MAX_RB * NRE>& mask, uns
   }
 }
 
-unsigned re_pattern_list::get_inclusion_count(unsigned                      start_symbol,
-                                              unsigned                      nof_symbols,
-                                              const bounded_bitset<MAX_RB>& rb_mask) const
+unsigned
+re_pattern_list::get_inclusion_count(unsigned start_symbol, unsigned nof_symbols, const prb_bitmap& rb_mask) const
 {
   // Early return if the list is empty.
   if (list.empty()) {
@@ -187,7 +186,7 @@ unsigned re_pattern_list::get_inclusion_count(unsigned                      star
     const re_pattern& pattern = list.front();
 
     // Get PRB mask from the pattern.
-    bounded_bitset<MAX_RB> prb_mask = pattern.prb_mask;
+    prb_bitmap prb_mask = pattern.prb_mask;
 
     // Adapt pattern to the mask size.
     prb_mask.resize(rb_mask.size());
@@ -200,8 +199,8 @@ unsigned re_pattern_list::get_inclusion_count(unsigned                      star
 
   unsigned count = 0;
 
-  re_prb_mask                 base_re_mask   = ~re_prb_mask();
-  bounded_bitset<MAX_RB* NRE> active_re_mask = rb_mask.kronecker_product<NRE>(base_re_mask);
+  re_prb_mask                  base_re_mask   = ~re_prb_mask();
+  bounded_bitset<MAX_RB * NRE> active_re_mask = rb_mask.kronecker_product<NRE>(base_re_mask);
 
   for (unsigned symbol_idx = start_symbol; symbol_idx != start_symbol + nof_symbols; ++symbol_idx) {
     bounded_bitset<MAX_RB * NRE> inclusion_mask(active_re_mask.size());

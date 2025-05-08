@@ -100,6 +100,22 @@ void pdcp_entity_rx::stop()
   }
 }
 
+void pdcp_entity_rx::notify_pdu_processing_stopped()
+{
+  if (not stopped) {
+    token_mngr.stop();
+    logger.log_debug("Stopped PDCP entity PDU processing");
+  }
+}
+
+void pdcp_entity_rx::restart_pdu_processing()
+{
+  if (not stopped) {
+    token_mngr.start();
+    logger.log_debug("Started PDCP entity PDU processing");
+  }
+}
+
 manual_event_flag& pdcp_entity_rx::crypto_awaitable()
 {
   return token_mngr.get_awaitable();
@@ -190,6 +206,9 @@ void pdcp_entity_rx::reestablish(security::sec_128_as_config sec_cfg)
 
 void pdcp_entity_rx::handle_data_pdu(byte_buffer pdu, std::chrono::system_clock::time_point time_of_arrival)
 {
+  // Count all received data PDUs.
+  metrics.add_data_pdus(1, pdu.length());
+
   // Sanity check
   if (pdu.length() <= hdr_len_bytes) {
     metrics.add_dropped_pdus(1);
@@ -673,6 +692,10 @@ void pdcp_entity_rx::handle_t_reordering_expire()
 // Reordering Timer Callback (t-reordering)
 void pdcp_entity_rx::reordering_callback::operator()(timer_id_t /*timer_id*/)
 {
+  if (parent->stopped) {
+    parent->logger.log_debug("Re-ordering timer expired after bearer was stopped.");
+    return;
+  }
   parent->logger.log_info("Reordering timer expired. {}", parent->st);
   parent->handle_t_reordering_expire();
 }

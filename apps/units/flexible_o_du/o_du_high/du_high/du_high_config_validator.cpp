@@ -345,7 +345,8 @@ static bool validate_pdsch_cell_unit_config(const du_high_unit_pdsch_config& con
 }
 
 /// Validates the given PUSCH cell application configuration. Returns true on success, otherwise false.
-static bool validate_pusch_cell_unit_config(const du_high_unit_pusch_config& config, unsigned cell_crbs)
+static bool
+validate_pusch_cell_unit_config(const du_high_unit_pusch_config& config, unsigned cell_crbs, unsigned min_k1)
 {
   if (config.min_ue_mcs > config.max_ue_mcs) {
     fmt::print("Invalid UE MCS range (i.e., [{}, {}]). The min UE MCS must be less than or equal to the max UE MCS.\n",
@@ -380,12 +381,12 @@ static bool validate_pusch_cell_unit_config(const du_high_unit_pusch_config& con
     return false;
   }
 
-  if (config.enable_transform_precoding && !is_transform_precoding_nof_prb_valid(config.min_rb_size)) {
+  if (config.enable_transform_precoding && !transform_precoding::is_nof_prbs_valid(config.min_rb_size)) {
     fmt::print("Invalid minimum UE PUSCH RB (i.e., {}) with transform precoding. The nearest lower number of PRB is {} "
                "and the higher is {}.\n",
                config.min_rb_size,
-               get_transform_precoding_nearest_lower_nof_prb_valid(config.min_rb_size),
-               get_transform_precoding_nearest_higher_nof_prb_valid(config.min_rb_size));
+               transform_precoding::get_nof_prbs_lower_bound(config.min_rb_size),
+               transform_precoding::get_nof_prbs_upper_bound(config.min_rb_size));
     return false;
   }
 
@@ -399,6 +400,12 @@ static bool validate_pusch_cell_unit_config(const du_high_unit_pusch_config& con
 
   if (config.start_rb >= cell_crbs) {
     fmt::print("Invalid start RB {} for UE PUSCHs. The start_rb must be less than the cell BW.\n", config.start_rb);
+    return false;
+  }
+
+  if (min_k1 < config.min_k2) {
+    fmt::print("The value min_k2 {} set for PUSCH cannot be greater than the min_k1 {} set for PUCCH config.\n",
+               config.start_rb);
     return false;
   }
 
@@ -467,6 +474,19 @@ static bool validate_pucch_cell_unit_config(const du_high_unit_base_cell_config&
     fmt::print("With the given PUCCH parameters, the number of PUCCH resources per cell exceeds the limit={}.\n",
                pucch_constants::MAX_NOF_CELL_PUCCH_RESOURCES);
     return false;
+  }
+
+  // [Implementation defined] The scheduler expects the resources from the common resource set and Resource Set 0 to use
+  // the same format. The formats from the common resource sets are expressed in TS 38.213 Table 9.2.1-1.
+  if (pucch_cfg.pucch_resource_common.has_value()) {
+    if (pucch_cfg.use_format_0 and pucch_cfg.pucch_resource_common.value() > 2) {
+      fmt::print("When using PUCCH Format 0, the valid values for pucch_resource_common are {{0, 1, 2}}.\n");
+      return false;
+    }
+    if (not pucch_cfg.use_format_0 and pucch_cfg.pucch_resource_common.value() <= 2) {
+      fmt::print("When using PUCCH Format 1, the valid values for pucch_resource_common are {{3, ..., 15}}.\n");
+      return false;
+    }
   }
 
   // The number of symbols reserved for PUCCH depends on whether the GNB uses (periodic) Sounding Reference Signals
@@ -771,6 +791,18 @@ static bool validate_tdd_ul_dl_pattern_unit_config(const tdd_ul_dl_pattern_unit_
     return false;
   }
 
+  // NOTE: 1 of the slots in the TDD pattern is the special slot.
+  if (config.nof_dl_slots + config.nof_ul_slots > config.dl_ul_period_slots - 1) {
+    fmt::print("Invalid TDD pattern: the sum of DL and UL slots is not compatible with TDD period.\n");
+    return false;
+  }
+
+  // Extended CP not currently supported: assume 14 symbols per slot; 2 symbols for DL-to-UL switching.
+  if (config.nof_dl_symbols + config.nof_ul_symbols > NOF_OFDM_SYM_PER_SLOT_NORMAL_CP - 2U) {
+    fmt::print("Invalid TDD pattern: the sum of DL and UL symbols in the special slot should not exceed 12.\n");
+    return false;
+  }
+
   const unsigned period_msec = config.dl_ul_period_slots / get_nof_slots_per_subframe(common_scs);
 
   static constexpr std::array<float, 10> valid_periods = {0.5F, 0.625, 1.0, 1.25, 2.0, 2.5, 3.0, 4.0, 5.0, 10.0};
@@ -1029,7 +1061,7 @@ static bool validate_base_cell_unit_config(const du_high_unit_base_cell_config& 
     return false;
   }
 
-  if (!validate_pusch_cell_unit_config(config.pusch_cfg, nof_crbs)) {
+  if (!validate_pusch_cell_unit_config(config.pusch_cfg, nof_crbs, config.pucch_cfg.min_k1)) {
     return false;
   }
 

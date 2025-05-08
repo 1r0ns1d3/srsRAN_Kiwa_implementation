@@ -32,11 +32,6 @@ using namespace asn1::rrc_nr;
 
 namespace {
 
-asn1::rrc_nr::subcarrier_spacing_e get_asn1_scs(subcarrier_spacing scs)
-{
-  return asn1::rrc_nr::subcarrier_spacing_e{static_cast<asn1::rrc_nr::subcarrier_spacing_opts::options>(scs)};
-}
-
 /// Helper type used to generate ASN.1 diff
 struct rlc_bearer_config {
   lcid_t                  lcid;
@@ -2092,6 +2087,20 @@ calculate_pusch_config_diff(asn1::rrc_nr::pusch_cfg_s& out, const pusch_config& 
         break;
       default:
         srsran_assertion_failure("Invalid PUSCH Transform Precoder={}", fmt::underlying(dest.trans_precoder));
+    }
+
+    if (dest.mcs_table != pusch_mcs_table::qam64) {
+      out.mcs_table_transform_precoder_present = true;
+      switch (dest.mcs_table) {
+        case pusch_mcs_table::qam64LowSe:
+          out.mcs_table_transform_precoder.value = pusch_cfg_s::mcs_table_transform_precoder_opts::qam64_low_se;
+          break;
+        case pusch_mcs_table::qam256:
+          out.mcs_table_transform_precoder.value = pusch_cfg_s::mcs_table_transform_precoder_opts::qam256;
+          break;
+        default:
+          report_fatal_error("Invalid PUSCH MCS Table={}", fmt::underlying(dest.mcs_table));
+      }
     }
   }
 

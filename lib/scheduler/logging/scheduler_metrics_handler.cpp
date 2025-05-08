@@ -22,24 +22,51 @@
 
 #include "scheduler_metrics_handler.h"
 #include "../config/cell_configuration.h"
-
 #include "srsran/scheduler/result/sched_result.h"
 #include "srsran/scheduler/scheduler_configurator.h"
 #include "srsran/srslog/srslog.h"
 
 using namespace srsran;
 
-cell_metrics_handler::cell_metrics_handler(msecs                       metrics_report_period,
-                                           scheduler_metrics_notifier& notifier_,
-                                           const cell_configuration&   cell_cfg_) :
-  notifier(notifier_), report_period(metrics_report_period), cell_cfg(cell_cfg_)
+namespace {
+
+class null_metrics_notifier final : public scheduler_metrics_notifier
 {
+public:
+  void report_metrics(const scheduler_cell_metrics& report) override {}
+};
+
+null_metrics_notifier null_notifier;
+
+} // namespace
+
+cell_metrics_handler::cell_metrics_handler(
+    const cell_configuration&                                                      cell_cfg_,
+    const std::optional<sched_cell_configuration_request_message::metrics_config>& metrics_cfg) :
+  notifier(metrics_cfg.has_value() and metrics_cfg->notifier != nullptr ? *metrics_cfg->notifier : null_notifier),
+  report_period(metrics_cfg.has_value() and metrics_cfg->notifier != nullptr ? metrics_cfg->report_period
+                                                                             : std::chrono::milliseconds{0}),
+  cell_cfg(cell_cfg_),
+  nof_slots_per_sf(get_nof_slots_per_subframe(cell_cfg.scs_common)),
+  report_period_slots(report_period.count() * nof_slots_per_sf)
+{
+  if (not connected()) {
+    return;
+  }
+
   next_report.ue_metrics.reserve(MAX_NOF_DU_UES);
-  next_report.events.reserve(MAX_NOF_DU_UES);
+  // Note: there can be more than one event per UE.
+  constexpr unsigned prereserved_events_per_ue = 3;
+  next_report.events.reserve(MAX_NOF_DU_UES * prereserved_events_per_ue);
+  ues.reserve(MAX_NOF_DU_UES);
+  rnti_to_ue_index_lookup.reserve(MAX_NOF_DU_UES);
 }
 
 void cell_metrics_handler::handle_ue_creation(du_ue_index_t ue_index, rnti_t rnti, pci_t pcell_pci)
 {
+  if (not connected()) {
+    return;
+  }
   ues.emplace(ue_index);
   ues[ue_index].rnti     = rnti;
   ues[ue_index].ue_index = ue_index;
@@ -51,12 +78,18 @@ void cell_metrics_handler::handle_ue_creation(du_ue_index_t ue_index, rnti_t rnt
 
 void cell_metrics_handler::handle_ue_reconfiguration(du_ue_index_t ue_index)
 {
+  if (not connected()) {
+    return;
+  }
   next_report.events.push_back(
       scheduler_cell_event{last_slot_tx, ues[ue_index].rnti, scheduler_cell_event::event_type::ue_reconf});
 }
 
 void cell_metrics_handler::handle_ue_deletion(du_ue_index_t ue_index)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(ue_index)) {
     rnti_t rnti = ues[ue_index].rnti;
     next_report.events.push_back(scheduler_cell_event{last_slot_tx, rnti, scheduler_cell_event::event_type::ue_rem});
@@ -68,6 +101,9 @@ void cell_metrics_handler::handle_ue_deletion(du_ue_index_t ue_index)
 
 void cell_metrics_handler::handle_rach_indication(const rach_indication_message& msg)
 {
+  if (not connected()) {
+    return;
+  }
   for (auto& occ : msg.occasions) {
     data.nof_prach_preambles += occ.preambles.size();
   }
@@ -77,6 +113,9 @@ void cell_metrics_handler::handle_crc_indication(slot_point                   sl
                                                  const ul_crc_pdu_indication& crc_pdu,
                                                  units::bytes                 tbs)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(crc_pdu.ue_index)) {
     auto& u = ues[crc_pdu.ue_index];
     u.data.count_crc_acks += crc_pdu.tb_crc_success ? 1 : 0;
@@ -103,6 +142,9 @@ void cell_metrics_handler::handle_crc_indication(slot_point                   sl
 
 void cell_metrics_handler::handle_srs_indication(const srs_indication::srs_indication_pdu& srs_pdu, unsigned ri)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(srs_pdu.ue_index)) {
     auto& u = ues[srs_pdu.ue_index];
     if (srs_pdu.time_advance_offset.has_value()) {
@@ -174,6 +216,9 @@ void cell_metrics_handler::handle_harq_timeout(du_ue_index_t ue_index, bool is_d
 
 void cell_metrics_handler::handle_uci_pdu_indication(const uci_indication::uci_pdu& pdu, bool is_sr_opportunity_and_f1)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(pdu.ue_index)) {
     auto& u = ues[pdu.ue_index];
 
@@ -240,6 +285,9 @@ void cell_metrics_handler::handle_sr_indication(du_ue_index_t ue_index)
 
 void cell_metrics_handler::handle_ul_bsr_indication(const ul_bsr_indication_message& bsr)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(bsr.ue_index)) {
     auto& u = ues[bsr.ue_index];
 
@@ -254,6 +302,9 @@ void cell_metrics_handler::handle_ul_bsr_indication(const ul_bsr_indication_mess
 
 void cell_metrics_handler::handle_ul_phr_indication(const ul_phr_indication_message& phr_ind)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(phr_ind.ue_index)) {
     auto& u = ues[phr_ind.ue_index];
 
@@ -272,6 +323,9 @@ void cell_metrics_handler::handle_ul_phr_indication(const ul_phr_indication_mess
 
 void cell_metrics_handler::handle_dl_buffer_state_indication(const dl_buffer_state_indication_message& dl_bs)
 {
+  if (not connected()) {
+    return;
+  }
   if (ues.contains(dl_bs.ue_index)) {
     auto& u = ues[dl_bs.ue_index];
 
@@ -292,6 +346,8 @@ void cell_metrics_handler::report_metrics()
     next_report.ue_metrics.push_back(ue.compute_report(report_period, nof_slots_per_sf));
   }
 
+  next_report.pci                       = cell_cfg.pci;
+  next_report.slot                      = last_slot_tx - report_period_slots;
   next_report.nof_slots                 = report_period_slots;
   next_report.nof_error_indications     = data.error_indication_counter;
   next_report.average_decision_latency  = data.decision_latency_sum / report_period_slots;
@@ -304,6 +360,8 @@ void cell_metrics_handler::report_metrics()
   next_report.nof_prach_preambles       = data.nof_prach_preambles;
   next_report.dl_grants_count           = data.nof_ue_pdsch_grants;
   next_report.ul_grants_count           = data.nof_ue_pusch_grants;
+  next_report.nof_failed_pdcch_allocs   = data.nof_failed_pdcch_allocs;
+  next_report.nof_failed_uci_allocs     = data.nof_failed_uci_allocs;
 
   // Reset cell-wide metric counters.
   data = {};
@@ -319,6 +377,9 @@ void cell_metrics_handler::report_metrics()
 void cell_metrics_handler::handle_slot_result(const sched_result&       slot_result,
                                               std::chrono::microseconds slot_decision_latency)
 {
+  if (not connected()) {
+    return;
+  }
   data.nof_ue_pdsch_grants += slot_result.dl.ue_grants.size();
   for (const dl_msg_alloc& dl_grant : slot_result.dl.ue_grants) {
     auto it = rnti_to_ue_index_lookup.find(dl_grant.pdsch_cfg.rnti);
@@ -376,20 +437,24 @@ void cell_metrics_handler::handle_slot_result(const sched_result&       slot_res
   unsigned bin_idx = slot_decision_latency.count() / scheduler_cell_metrics::nof_usec_per_bin;
   bin_idx          = std::min(bin_idx, scheduler_cell_metrics::latency_hist_bins - 1);
   ++data.decision_latency_hist[bin_idx];
+
+  // Failed allocation attempts.
+  data.nof_failed_pdcch_allocs = slot_result.failed_attempts.pdcch;
+  data.nof_failed_uci_allocs   = slot_result.failed_attempts.uci;
 }
 
 void cell_metrics_handler::push_result(slot_point                sl_tx,
                                        const sched_result&       slot_result,
                                        std::chrono::microseconds slot_decision_latency)
 {
+  if (report_period_slots == 0) {
+    return;
+  }
   if (SRSRAN_UNLIKELY(not next_report_slot.valid())) {
     // We enter here in the first call to this function.
     // We will make the \c next_report_slot aligned with the period.
-    nof_slots_per_sf    = get_nof_slots_per_subframe(to_subcarrier_spacing(sl_tx.numerology()));
-    usecs slot_dur      = usecs{1000U >> sl_tx.numerology()};
-    report_period_slots = usecs{report_period} / slot_dur;
-    unsigned mod_val    = sl_tx.to_uint() % report_period_slots;
-    next_report_slot    = mod_val > 0 ? sl_tx + report_period_slots - mod_val : sl_tx;
+    unsigned mod_val = sl_tx.to_uint() % report_period_slots;
+    next_report_slot = mod_val > 0 ? sl_tx + report_period_slots - mod_val : sl_tx;
   }
   last_slot_tx = sl_tx;
 
@@ -483,20 +548,21 @@ void cell_metrics_handler::ue_metric_context::reset()
   data = {};
 }
 
-scheduler_metrics_handler::scheduler_metrics_handler(msecs                       metrics_report_period,
-                                                     scheduler_metrics_notifier& notifier_) :
-  notifier(notifier_), report_period(metrics_report_period)
-{
-}
-
-cell_metrics_handler* scheduler_metrics_handler::add_cell(const cell_configuration& cell_cfg)
+cell_metrics_handler* scheduler_metrics_handler::add_cell(
+    const cell_configuration&                                                      cell_cfg,
+    const std::optional<sched_cell_configuration_request_message::metrics_config>& metrics_cfg)
 {
   if (cells.contains(cell_cfg.cell_index)) {
     srslog::fetch_basic_logger("SCHED").warning("Cell={} already exists", fmt::underlying(cell_cfg.cell_index));
     return nullptr;
   }
 
-  cells.emplace(cell_cfg.cell_index, std::make_unique<cell_metrics_handler>(report_period, notifier, cell_cfg));
+  cells.emplace(cell_cfg.cell_index, std::make_unique<cell_metrics_handler>(cell_cfg, metrics_cfg));
 
   return cells[cell_cfg.cell_index].get();
+}
+
+void scheduler_metrics_handler::rem_cell(du_cell_index_t cell_index)
+{
+  cells.erase(cell_index);
 }

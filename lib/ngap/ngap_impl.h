@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "metrics/ngap_metrics_aggregator.h"
 #include "ngap_connection_handler.h"
 #include "ngap_error_indication_helper.h"
 #include "procedures/ngap_transaction_manager.h"
@@ -77,9 +78,12 @@ public:
   void                  handle_inter_cu_ho_rrc_recfg_complete(const ue_index_t           ue_index,
                                                               const nr_cell_global_id_t& cgi,
                                                               const unsigned             tac) override;
-  const ngap_context_t& get_ngap_context() const override { return context; };
+  const ngap_context_t& get_ngap_context() const override { return context; }
   void             handle_ul_ue_associated_nrppa_transport(ue_index_t ue_index, const byte_buffer& nrppa_pdu) override;
   async_task<void> handle_ul_non_ue_associated_nrppa_transport(const byte_buffer& nrppa_pdu) override;
+
+  // ngap_metrics_handler
+  ngap_info handle_ngap_metrics_report_request() const override;
 
   // ngap_statistics_handler
   size_t get_nof_ues() const override { return ue_ctxt_list.size(); }
@@ -94,6 +98,7 @@ public:
   ngap_ue_radio_capability_management_handler& get_ngap_ue_radio_cap_management_handler() override { return *this; }
   ngap_control_message_handler&                get_ngap_control_message_handler() override { return *this; }
   ngap_ue_control_manager&                     get_ngap_ue_control_manager() override { return *this; }
+  ngap_metrics_handler&                        get_metrics_handler() override { return *this; }
   ngap_statistics_handler&                     get_ngap_statistics_handler() override { return *this; }
   ngap_ue_context_removal_handler&             get_ngap_ue_context_removal_handler() override { return *this; }
 
@@ -176,6 +181,13 @@ private:
   /// \brief Callback for the PDU Session Request Timer expiration. Triggers the release of the UE.
   void on_request_pdu_session_timer_expired(ue_index_t ue_index);
 
+  /// \brief Validates consistent UE id pair. It checks if an existing context already exists
+  /// for the received AMF-UE-NGAP-ID and checks if it matches the received RAN-UE-NGAP-ID.
+  /// \param[in] ran_ue_ngap_id The received RAN-UE-NGAP-ID.
+  /// \param[in] amf_ue_ngap_id The received AMF-UE-NGAP-ID.
+  /// \return True if the pair is consistent, false otherwise.
+  [[nodiscard]] bool validate_consistent_ue_id_pair(ran_ue_id_t ran_ue_ngap_id, amf_ue_id_t amf_ue_ngap_id);
+
   /// \brief Log NGAP RX PDU.
   void log_rx_pdu(const ngap_message& msg);
 
@@ -191,6 +203,9 @@ private:
   ngap_cu_cp_notifier& cu_cp_notifier;
   timer_manager&       timers;
   task_executor&       ctrl_exec;
+
+  // Metrics aggregator.
+  ngap_metrics_aggregator metrics_handler;
 
   ngap_transaction_manager ev_mng;
 
